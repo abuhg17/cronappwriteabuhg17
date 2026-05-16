@@ -16,7 +16,7 @@ Add these repository secrets in GitHub:
 - `APPWRITE_DATABASE_ID`
 - `APPWRITE_API_KEY`
 
-The workflow also accepts the same names used by Appwrite frontend projects:
+The workflow also accepts the same names used by Appwrite frontend projects, from either Actions secrets or Actions variables:
 
 - `NEXT_PUBLIC_APPWRITE_ENDPOINT`
 - `NEXT_PUBLIC_APPWRITE_PROJECT_ID`

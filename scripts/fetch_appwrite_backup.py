@@ -348,11 +348,12 @@ def build_snapshot() -> Dict[str, Any]:
         try:
             return build_snapshot_with_config(config)
         except AppwriteApiError as exc:
-            if exc.error_type == "project_not_found" and index < len(configs):
+            if exc.error_type == "project_not_found":
                 last_project_not_found = exc
-                log_progress(
-                    f"{config.source} returned project_not_found; trying alternate Appwrite configuration"
-                )
+                if index < len(configs):
+                    log_progress(
+                        f"{config.source} returned project_not_found; trying alternate Appwrite configuration"
+                    )
                 continue
             raise
 
