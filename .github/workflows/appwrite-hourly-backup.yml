@@ -1,9 +1,6 @@
 name: Hourly Appwrite Sync
 
 on:
-  push:
-    branches:
-      - main
   schedule:
     - cron: "33 * * * *"
     - cron: "37 * * * *"
