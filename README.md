@@ -16,6 +16,13 @@ Add these repository secrets in GitHub:
 - `APPWRITE_DATABASE_ID`
 - `APPWRITE_API_KEY`
 
+The workflow also accepts the same names used by Appwrite frontend projects:
+
+- `NEXT_PUBLIC_APPWRITE_ENDPOINT`
+- `NEXT_PUBLIC_APPWRITE_PROJECT_ID`
+- `NEXT_PUBLIC_APPWRITE_DATABASE_ID`
+- `NEXT_PUBLIC_APPWRITE_API_KEY`
+
 Use these values from your Appwrite project:
 
 - Endpoint: your Appwrite API endpoint
@@ -31,6 +38,7 @@ Use these values from your Appwrite project:
 - Commits backup changes back into the repository
 - Uses workflow concurrency to avoid overlapping runs on the same branch
 - If Appwrite reports `project_paused`, the workflow logs a warning and skips that run
+- If the primary `APPWRITE_*` configuration returns `project_not_found`, the script tries the `NEXT_PUBLIC_APPWRITE_*` configuration before failing
 
 ## Important note about schedule time
 

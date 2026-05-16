@@ -4,7 +4,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, NamedTuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -14,11 +14,33 @@ class AppwritePausedError(RuntimeError):
     """Raised when Appwrite pauses the project due to inactivity."""
 
 
+class AppwriteApiError(RuntimeError):
+    def __init__(self, code: int, path: str, body: str, error_type: str | None = None) -> None:
+        self.code = code
+        self.path = path
+        self.body = body
+        self.error_type = error_type
+        super().__init__(f"Appwrite API error {code} on {path}: {body}")
+
+
+class AppwriteConfig(NamedTuple):
+    endpoint: str
+    project_id: str
+    database_id: str
+    api_key: str
+    source: str
+
+
 DEBUG_ENABLED = os.getenv("APPWRITE_EXPORT_DEBUG", "1").strip().lower() not in {"0", "false", "no", "off"}
 REDACTED_SECRET = "[REDACTED_SECRET]"
-SENSITIVE_KEY_PARTS = ("key", "token", "secret", "password", "authorization", "auth")
+SENSITIVE_KEY_PATTERN = re.compile(
+    r"(^|[_-])(api[_-]?key|authorization|auth[_-]?token|client[_-]?secret|password|"
+    r"private[_-]?key|refresh[_-]?token|secret|token)($|[_-])",
+    re.IGNORECASE,
+)
 SECRET_VALUE_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\bxapp-[A-Za-z0-9][A-Za-z0-9_-]{16,}\b"),
     re.compile(r"\bBearer\s+[A-Za-z0-9._-]{16,}\b"),
 )
 
@@ -38,6 +60,62 @@ def require_env(name: str) -> str:
         raise RuntimeError(f"Missing required environment variable: {name}")
     log_debug(f"Loaded required environment variable {name}")
     return value
+
+
+def optional_env(name: str) -> str | None:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return None
+    log_debug(f"Loaded optional environment variable {name}")
+    return value
+
+
+def config_from_env(prefix: str, source: str) -> AppwriteConfig | None:
+    endpoint = optional_env(f"{prefix}APPWRITE_ENDPOINT")
+    project_id = optional_env(f"{prefix}APPWRITE_PROJECT_ID")
+    database_id = optional_env(f"{prefix}APPWRITE_DATABASE_ID")
+    api_key = optional_env(f"{prefix}APPWRITE_API_KEY")
+    values = (endpoint, project_id, database_id, api_key)
+
+    if not any(values):
+        return None
+    if not all(values):
+        missing = [
+            f"{prefix}APPWRITE_ENDPOINT" if endpoint is None else "",
+            f"{prefix}APPWRITE_PROJECT_ID" if project_id is None else "",
+            f"{prefix}APPWRITE_DATABASE_ID" if database_id is None else "",
+            f"{prefix}APPWRITE_API_KEY" if api_key is None else "",
+        ]
+        raise RuntimeError(f"Incomplete Appwrite configuration in {source}: {', '.join(item for item in missing if item)}")
+
+    return AppwriteConfig(endpoint.rstrip("/"), project_id, database_id, api_key, source)
+
+
+def get_appwrite_configs() -> List[AppwriteConfig]:
+    configs = [
+        config
+        for config in (
+            config_from_env("", "APPWRITE_*"),
+            config_from_env("NEXT_PUBLIC_", "NEXT_PUBLIC_APPWRITE_*"),
+        )
+        if config is not None
+    ]
+
+    if not configs:
+        raise RuntimeError(
+            "Missing required Appwrite environment variables: APPWRITE_* or NEXT_PUBLIC_APPWRITE_*"
+        )
+
+    unique_configs: List[AppwriteConfig] = []
+    seen = set()
+    for config in configs:
+        key = (config.endpoint, config.project_id, config.database_id, config.api_key)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_configs.append(config)
+
+    return unique_configs
 
 
 def appwrite_get(
@@ -81,7 +159,8 @@ def appwrite_get(
         if exc.code == 403 and isinstance(payload, dict) and payload.get("type") == "project_paused":
             raise AppwritePausedError(payload.get("message", "Project is paused.")) from exc
 
-        raise RuntimeError(f"Appwrite API error {exc.code} on {path}: {body}") from exc
+        error_type = payload.get("type") if isinstance(payload, dict) else None
+        raise AppwriteApiError(exc.code, path, body, error_type) from exc
     except URLError as exc:
         log_debug(f"URLError on {path}: {exc}")
         raise RuntimeError(f"Failed to reach Appwrite endpoint: {exc}") from exc
@@ -101,31 +180,32 @@ def build_query(method: str, values: List[Any], column: str | None = None) -> st
 
 def list_collections(endpoint: str, project_id: str, api_key: str, database_id: str) -> List[Dict[str, Any]]:
     collections: List[Dict[str, Any]] = []
-    offset = 0
     page_size = 100
+    cursor_after: str | None = None
 
     while True:
+        queries = [build_query("limit", [page_size])]
+        if cursor_after:
+            queries.append(build_query("cursorAfter", [cursor_after]))
+
         payload = appwrite_get(
             endpoint,
             project_id,
             api_key,
             f"/databases/{database_id}/collections",
             params={
-                "queries[]": [
-                    build_query("limit", [page_size]),
-                    build_query("offset", [offset]),
-                ],
+                "queries[]": queries,
                 "total": "false",
             },
         )
         batch = payload.get("collections", [])
         collections.extend(batch)
-        log_progress(f"Loaded collection page at offset {offset}; total collections discovered: {len(collections)}")
-        log_debug(f"Collection page offset {offset} returned {len(batch)} collections")
+        log_progress(f"Loaded collection page; total collections discovered: {len(collections)}")
+        log_debug(f"Collection page returned {len(batch)} collections")
 
         if len(batch) < page_size:
             break
-        offset += page_size
+        cursor_after = batch[-1]["$id"]
 
     return collections
 
@@ -141,22 +221,23 @@ def list_documents(
     total_collections: int,
 ) -> List[Dict[str, Any]]:
     documents: List[Dict[str, Any]] = []
-    offset = 0
     page_size = 100
     page_number = 0
+    cursor_after: str | None = None
 
     while True:
         page_number += 1
+        queries = [build_query("limit", [page_size])]
+        if cursor_after:
+            queries.append(build_query("cursorAfter", [cursor_after]))
+
         payload = appwrite_get(
             endpoint,
             project_id,
             api_key,
             f"/databases/{database_id}/collections/{collection_id}/documents",
             params={
-                "queries[]": [
-                    build_query("limit", [page_size]),
-                    build_query("offset", [offset]),
-                ],
+                "queries[]": queries,
                 "total": "false",
             },
         )
@@ -167,12 +248,12 @@ def list_documents(
             f"fetched {len(batch)} docs, accumulated {len(documents)}"
         )
         log_debug(
-            f"Collection {collection_name} ({collection_id}) page {page_number} used offset {offset} and page size {page_size}"
+            f"Collection {collection_name} ({collection_id}) page {page_number} used cursor pagination"
         )
 
         if len(batch) < page_size:
             break
-        offset += page_size
+        cursor_after = batch[-1]["$id"]
 
     return documents
 
@@ -185,10 +266,8 @@ def write_json(path: Path, payload: Dict[str, Any]) -> None:
 
 def redact_string(value: str, key_hint: str | None = None) -> str:
     redacted = value
-    if key_hint:
-        normalized_key = key_hint.lower()
-        if any(part in normalized_key for part in SENSITIVE_KEY_PARTS):
-            return REDACTED_SECRET
+    if key_hint and SENSITIVE_KEY_PATTERN.search(key_hint):
+        return REDACTED_SECRET
 
     for pattern in SECRET_VALUE_PATTERNS:
         redacted = pattern.sub(REDACTED_SECRET, redacted)
@@ -206,18 +285,13 @@ def sanitize_payload(value: Any, key_hint: str | None = None) -> Any:
     return value
 
 
-def build_snapshot() -> Dict[str, Any]:
-    endpoint = require_env("APPWRITE_ENDPOINT")
-    project_id = require_env("APPWRITE_PROJECT_ID")
-    database_id = require_env("APPWRITE_DATABASE_ID")
-    api_key = require_env("APPWRITE_API_KEY")
-
-    log_progress(f"Starting Appwrite export for database {database_id}")
+def build_snapshot_with_config(config: AppwriteConfig) -> Dict[str, Any]:
+    log_progress(f"Starting Appwrite export for database {config.database_id} using {config.source}")
     log_debug(f"Debug logging is {'enabled' if DEBUG_ENABLED else 'disabled'}")
-    log_debug(f"Export endpoint: {endpoint.rstrip('/')}")
-    log_debug(f"Export project ID: {project_id}")
+    log_debug(f"Export endpoint: {config.endpoint}")
+    log_debug(f"Export project ID: {config.project_id}")
 
-    collections = list_collections(endpoint, project_id, api_key, database_id)
+    collections = list_collections(config.endpoint, config.project_id, config.api_key, config.database_id)
     exported_collections = []
     total_collections = len(collections)
     log_progress(f"Discovered {total_collections} collections to export")
@@ -230,10 +304,10 @@ def build_snapshot() -> Dict[str, Any]:
             f"Collection metadata for {collection_name} ({collection_id}): permissions={len(collection.get('$permissions', []))}"
         )
         documents = list_documents(
-            endpoint,
-            project_id,
-            api_key,
-            database_id,
+            config.endpoint,
+            config.project_id,
+            config.api_key,
+            config.database_id,
             collection_id,
             collection_name,
             index,
@@ -255,8 +329,8 @@ def build_snapshot() -> Dict[str, Any]:
     log_debug(f"Snapshot timestamp: {exported_at.isoformat()}")
     snapshot = {
         "exportedAt": exported_at.isoformat(),
-        "projectId": project_id,
-        "databaseId": database_id,
+        "projectId": config.project_id,
+        "databaseId": config.database_id,
         "collectionCount": len(exported_collections),
         "collections": exported_collections,
     }
@@ -264,6 +338,31 @@ def build_snapshot() -> Dict[str, Any]:
     if sanitized_snapshot != snapshot:
         log_progress("Redacted sensitive values from exported snapshot")
     return sanitized_snapshot
+
+
+def build_snapshot() -> Dict[str, Any]:
+    configs = get_appwrite_configs()
+    last_project_not_found: AppwriteApiError | None = None
+
+    for index, config in enumerate(configs, start=1):
+        try:
+            return build_snapshot_with_config(config)
+        except AppwriteApiError as exc:
+            if exc.error_type == "project_not_found" and index < len(configs):
+                last_project_not_found = exc
+                log_progress(
+                    f"{config.source} returned project_not_found; trying alternate Appwrite configuration"
+                )
+                continue
+            raise
+
+    if last_project_not_found:
+        raise RuntimeError(
+            "Every Appwrite configuration returned project_not_found. Check that the endpoint and project ID belong "
+            "to the same Appwrite project in GitHub Secrets."
+        ) from last_project_not_found
+
+    raise RuntimeError("No Appwrite configuration was available")
 
 
 def main() -> int:
