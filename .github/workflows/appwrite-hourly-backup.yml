@@ -2,6 +2,7 @@ name: Hourly Appwrite Sync
 
 on:
   schedule:
+    # Dual schedule: GitHub cron is best-effort; two slots raise hit rate.
     - cron: "33 * * * *"
     - cron: "37 * * * *"
   workflow_dispatch:
@@ -19,6 +20,7 @@ permissions:
 jobs:
   backup:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -42,6 +44,10 @@ jobs:
           NEXT_PUBLIC_APPWRITE_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_APPWRITE_PROJECT_ID || vars.NEXT_PUBLIC_APPWRITE_PROJECT_ID }}
           NEXT_PUBLIC_APPWRITE_DATABASE_ID: ${{ secrets.NEXT_PUBLIC_APPWRITE_DATABASE_ID || vars.NEXT_PUBLIC_APPWRITE_DATABASE_ID }}
           NEXT_PUBLIC_APPWRITE_API_KEY: ${{ secrets.NEXT_PUBLIC_APPWRITE_API_KEY || vars.NEXT_PUBLIC_APPWRITE_API_KEY }}
+          # Keep ~7 days if the job fires twice/hour (2 × 24 × 7 = 336).
+          APPWRITE_HISTORY_KEEP_COUNT: "336"
+          APPWRITE_EXPORT_DEBUG: "1"
+          APPWRITE_HTTP_RETRIES: "2"
         run: python scripts/fetch_appwrite_backup.py
 
       - name: Commit updated backup files
