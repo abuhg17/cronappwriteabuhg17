@@ -1,8 +1,9 @@
 {
-  "exportedAt": "2026-06-06T19:55:18.063702+00:00",
+  "exportedAt": "2026-09-29T06:29:27.163783+00:00",
   "projectId": "6a060064003473b2ebe8",
   "databaseId": "6a07f690003819a630c6",
-  "collectionCount": 12,
+  "collectionCount": 13,
+  "contentHash": "568d143d288551396017125031567e6219e691bbae6835505ce2b0a5d3dfb355",
   "collections": [
     {
       "collection": {
@@ -37571,6 +37572,90 @@
         "indexes": [],
         "bytesMax": 65535,
         "bytesUsed": 11657
+      },
+      "documentsCount": 0,
+      "documents": []
+    },
+    {
+      "collection": {
+        "$id": "6abb5a5a000a40b86030",
+        "$createdAt": "2026-09-29T06:27:38.416+00:00",
+        "$updatedAt": "2026-09-29T06:27:38.416+00:00",
+        "$permissions": [],
+        "databaseId": "6a07f690003819a630c6",
+        "name": "notificationsettings",
+        "enabled": true,
+        "documentSecurity": false,
+        "attributes": [
+          {
+            "key": "passwordHash",
+            "type": "string",
+            "status": "available",
+            "error": "",
+            "required": false,
+            "array": false,
+            "$createdAt": "2026-09-29T06:27:39.113+00:00",
+            "$updatedAt": "2026-09-29T06:27:39.212+00:00",
+            "size": 300,
+            "default": null,
+            "encrypt": false
+          },
+          {
+            "key": "fromEmail",
+            "type": "string",
+            "status": "available",
+            "error": "",
+            "required": false,
+            "array": false,
+            "$createdAt": "2026-09-29T06:27:40.316+00:00",
+            "$updatedAt": "2026-09-29T06:27:41.369+00:00",
+            "size": 300,
+            "default": null,
+            "encrypt": false
+          },
+          {
+            "key": "slotsJson",
+            "type": "string",
+            "status": "available",
+            "error": "",
+            "required": false,
+            "array": false,
+            "$createdAt": "2026-09-29T06:27:41.585+00:00",
+            "$updatedAt": "2026-09-29T06:27:41.675+00:00",
+            "size": 20000,
+            "default": null,
+            "encrypt": false
+          },
+          {
+            "key": "googleClientId",
+            "type": "string",
+            "status": "available",
+            "error": "",
+            "required": false,
+            "array": false,
+            "$createdAt": "2026-09-29T06:27:41.826+00:00",
+            "$updatedAt": "2026-09-29T06:27:41.910+00:00",
+            "size": 300,
+            "default": null,
+            "encrypt": false
+          },
+          {
+            "key": "googleApiKey",
+            "type": "string",
+            "status": "available",
+            "error": "",
+            "required": false,
+            "array": false,
+            "$createdAt": "2026-09-29T06:27:42.119+00:00",
+            "$updatedAt": "2026-09-29T06:27:42.203+00:00",
+            "size": 300,
+            "default": null,
+            "encrypt": false
+          }
+        ],
+        "indexes": [],
+        "bytesMax": 65535,
+        "bytesUsed": 5895
       },
       "documentsCount": 0,
       "documents": []
